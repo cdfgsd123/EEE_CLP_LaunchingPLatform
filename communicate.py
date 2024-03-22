@@ -1,47 +1,47 @@
 # communicate
 import serial
+import time
 
 receivedString = ""
 pos = 0
 
-LeftString = [0x60, 0x0B, 0xFF, 0xFF, 0xFF, 0xFF]
-RightString = [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
 
-LeftStringSlow = [0x60, 0x0B, 0xC0, 0xC0, 0xC0, 0xC0]
-RightStringSlow = [0x60, 0x0B, 0x40, 0x40, 0x40, 0x40]
+leftMaxSpeed = 0xFF
+rightMaxSpeed = 0x00
+
+
+
+RightString = [0x60, 0x0B, 0xFF, 0xFF, 0xFF, 0xFF]
+LeftString = [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
+
+backwardString = [0x60, 0x0B, 0xFF, 0xFF, 0x00, 0x00]
+forwardString = [0x60, 0x0B, 0x00, 0x00, 0xFF, 0xFF]
 
 stopString = [0x60, 0x0B, 0x80, 0x80, 0x80, 0x80]
 
-ser = serial.Serial(port="COM5", baudrate=115200, timeout=0.5)
-
+ser = serial.Serial(port="COM5", baudrate=115200, timeout=0.01)
 
 # ser.write(serial.to_bytes(stopString))
-
 
 def turnLeft():
     ser.write(serial.to_bytes(LeftString))
 
-
 def turnRight():
     ser.write(serial.to_bytes(RightString))
-
-
-def turnLeftSlow():
-    ser.write(serial.to_bytes(LeftStringSlow))
-
-
-def turnRightSlow():
-    ser.write(serial.to_bytes(RightStringSlow))
-
 
 def stop():
     ser.write(serial.to_bytes(stopString))
 
+def goForward():
+    ser.write(serial.to_bytes(forwardString))
+
+def goBack():
+    ser.write(serial.to_bytes(backwardString))
 
 def showOutput():
     receivedString = ser.readline()
     if len(receivedString) >= 25:
-        pos = int(receivedString[25]) / 255 * 360  # current degree
+        pos = int(int(receivedString[25]) / 255 * 360)  # current degree
         print(receivedString)
 
         print("Degree = ", pos)
@@ -70,7 +70,6 @@ def dstop(command, pos, targetPos):
             turnLeft()
         elif targetPos < pos:
             turnRight()
-
     return pos, True
 
 
@@ -79,14 +78,22 @@ def updatePos(command):
     #     pos += 12  # right turn 12 degree
     # elif command == "left":
     #     pos -= 12  # left turn 12 degree
-    # if pos >= 360:
+    # if pos >= 360:x
     #     pos -= 360
     # elif pos < 0:
     #     pos += 360
     targetPos = 0
     return int(targetPos)
 
-
+goForward()
+time.sleep(5)
+stop()
+time.sleep(3)
 command = "right"
 while 1:
-    showOutput()
+
+    turnRight()
+    time.sleep(1)
+
+    stop()
+    time.sleep(3)
