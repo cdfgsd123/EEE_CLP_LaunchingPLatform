@@ -182,6 +182,6 @@ if __name__ == "__main__":
             servo.command = user_input
         else:
             try:
-                servo.setTargetPos(int(user_input) // 360)
+                servo.setTargetPos(int(user_input))
             except ValueError:
                 print("Enter integer")
