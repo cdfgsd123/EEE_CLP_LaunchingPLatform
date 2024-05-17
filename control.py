@@ -1,29 +1,31 @@
-# communicate
+# control
 import threading
 
 import serial
 
 
 class ServoControl:
-    def __init__(self, targetPos):
+    def __init__(self, targetPos=None, calibrate=0):
+        self.calibrate = calibrate
         self.receivedString = ""
         self.pos = 0  # current position in degree
-        self.targetPos = targetPos  # desired position
+        if targetPos is not None:
+            self.targetPos = targetPos  # desired position
         self.command = None  # control command
-        self.directions = ["a", "d", "s", "w"]
+        self.controls = ["a", "d", "s", "w", "calibrate"]
         # acceptable angle error
         self.lowThreshold = 5  # acceptable angle error
         self.highThreshold = 20  # for calcuating speed of rotation
         self.thresholdRange = self.highThreshold - self.lowThreshold
         self.angleDivision = 360 // 30
         # speed of servo (self-defined)
-        self.maxSpeed = 0xCC
-        self.minSpeed = 0x90
+        self.maxSpeed = 0xB0  # larger than 0x80 and assume
+        self.minSpeed = 0x90  # larger than 0x80
         self.speedRange = self.maxSpeed - self.minSpeed
 
         # 6 byte motion control signal to ESP32
-        self.RightString = [0x60, 0x0B, 0xFF, 0xFF, 0xFF, 0xFF]
-        self.LeftString = [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
+        self.LeftString = [0x60, 0x0B, 0xFF, 0xFF, 0xFF, 0xFF]
+        self.RightString = [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
 
         self.backwardString = [0x60, 0x0B, 0x90, 0x90, 0x70, 0x70]
         self.forwardString = [0x60, 0x0B, 0x70, 0x70, 0x90, 0x90]
@@ -31,7 +33,29 @@ class ServoControl:
         self.stopString = [0x60, 0x0B, 0x80, 0x80, 0x80, 0x80]
 
         # serial connection
-        self.ser = serial.Serial(port="COM5", baudrate=115200, timeout=0.1)
+        self.ser = serial.Serial(port="COM6", baudrate=115200, timeout=0.5)
+
+        # initial the position
+        self.initPos = False
+        calibrateCount = 0
+        while calibrateCount < 3:
+            receivedString = self.ser.readline()
+            if len(receivedString) >= 25:
+                # current pos
+                tempPos = int(int(receivedString[25]) / 255 * 360)
+                tempPos -= self.calibrate
+                if tempPos >= 360:
+                    tempPos -= 360
+                elif tempPos < 0:
+                    tempPos += 360
+                self.pos = tempPos
+                print(receivedString)
+                calibrateCount += 1
+                print("Degree = ", self.pos)
+        self.initPos = True
+        if targetPos is None:
+            self.targetPos = self.pos
+        print("finish init")
 
     #  setter and getter
     def setCommand(self, input):
@@ -56,19 +80,19 @@ class ServoControl:
 
     # 4 directions motion and stop
     def turnLeft(self, speed):
-        self.LeftString[2] = self.maxSpeed - speed  # servo 1
-        self.LeftString[4] = self.maxSpeed - speed  # servo 3
+        self.LeftString[2] = speed  # servo 1
+        self.LeftString[4] = speed  # servo 3
 
-        self.LeftString[3] = self.maxSpeed - speed  # servo 2
-        self.LeftString[5] = self.maxSpeed - speed  # servo 4
+        self.LeftString[3] = speed  # servo 2
+        self.LeftString[5] = speed  # servo 4
         self.ser.write(serial.to_bytes(self.LeftString))
 
     def turnRight(self, speed):
-        self.RightString[2] = speed  # servo 1
-        self.RightString[4] = speed  # servo 3
+        self.RightString[2] = 0xFF - speed  # servo 1
+        self.RightString[4] = 0xFF - speed  # servo 3
 
-        self.RightString[3] = speed  # servo 2
-        self.RightString[5] = speed  # servo 4
+        self.RightString[3] = 0xFF - speed  # servo 2
+        self.RightString[5] = 0xFF - speed  # servo 4
         self.ser.write(serial.to_bytes(self.RightString))
 
     def stop(self):
@@ -85,7 +109,13 @@ class ServoControl:
         self.command = command
         receivedString = self.ser.readline()
         if len(receivedString) >= 25:
-            self.pos = int(int(receivedString[25]) / 255 * 360)  # current pos
+            tempPos = int(int(receivedString[25]) / 255 * 360)  # current pos
+            tempPos -= self.calibrate
+            if tempPos >= 360:
+                tempPos -= 360
+            elif tempPos < 0:
+                tempPos += 360
+            self.pos = tempPos
             print(receivedString)
 
             print("Degree = ", self.pos)
@@ -93,29 +123,33 @@ class ServoControl:
 
             self.updateTargetPos()
 
-            stopped = self.dstop(command, self.pos, self.targetPos)
+            stopped = self.dstop()
             print("stopped: ", stopped)
+            print("getSpeedDisplay: ", self.getSpeedDisplay())
             print()
         return int(self.targetPos)
 
     # determine move or stop
     def dstop(self):
         # print("pos:", pos, " targetPos: ", targetPos)
-        if abs(self.targetPos - self.pos) <= self.lowThreshold:
+        tempDist = abs(self.targetPos - self.pos)
+        if tempDist >= 180:
+            tempDist = 360 - tempDist
+
+        if tempDist <= self.lowThreshold:
             self.stop()
             return True
 
         speed = self.getSpeed()
-
-        temp = self.targetPos - self.pos
-        if temp > 0 and abs(temp) < 180:
+        print("speed: ", speed)
+        if self.targetPos <= 180 and self.pos > 180:
             self.turnLeft(speed)
-        elif temp > 0 and abs(temp) >= 180:
+        elif self.targetPos > 180 and self.pos <= 180:
             self.turnRight(speed)
-        elif temp < 0 and abs(temp) < 180:
-            self.turnRight(speed)
+        elif self.targetPos > self.pos:
+            self.turnLeft(speed)
         else:
-            self.turnLeft(speed)
+            self.turnRight(speed)
         return False
 
     # update target position
@@ -134,11 +168,13 @@ class ServoControl:
     # return a value between 0 to 1 to represent servo speed(1: max speed)
     def getSpeedDisplay(self):
         distance = abs(self.targetPos - self.pos)
+        if distance >= 180:
+            distance = 360 - distance
 
         if distance >= self.highThreshold:
             distance = self.highThreshold
 
-        if distance < self.highThreshold:
+        if distance < self.lowThreshold:
             return 0
         else:
             fraction = (distance - self.lowThreshold) / self.thresholdRange
@@ -153,12 +189,50 @@ class ServoControl:
             speed = int(self.speedRange * fraction + self.minSpeed)
             return speed
 
+    # calibrate the position of
+    # set the current position as 0 degree, target position reset
+    def calibrateAngle(self):
+        # initial the position
+        prevPos, tempPos, tempAngleDiff = 0
+        self.stop()
+
+        self.initPos = False
+        calibrateCount = 0
+        while calibrateCount < 5 or tempAngleDiff > 3:
+            receivedString = self.ser.readline()
+            if len(receivedString) >= 25:
+                prevPos = tempPos
+                # current pos
+                tempPos = int(int(receivedString[25]) / 255 * 360)
+                if tempPos >= 360:
+                    tempPos -= 360
+                elif tempPos < 0:
+                    tempPos += 360
+                print("tempPos = ", tempPos)
+                calibrateCount += 1
+
+                if calibrateCount >= 5:
+                    tempAngleDiff = abs(prevPos - tempPos)
+                    if tempAngleDiff > 180:
+                        tempAngleDiff = 360 - tempAngleDiff
+
+        self.initPos = True
+        self.calibrate = tempPos
+        self.pos = 0
+
     # main function
+    # if command is given, we need "self.coomand = None"
+    # to clear the command
     def main(self):
+        while not self.initPos:
+            pass
         while True:
             print(self.command)
             if self.command is None:
                 self.showOutput()
+            elif self.command == "calibrate":
+                self.calibrateAngle()
+                self.command = None
             elif self.command == "x":
                 return
             else:
@@ -167,8 +241,9 @@ class ServoControl:
 
 
 if __name__ == "__main__":
-    servo = ServoControl(0)
+    servo = ServoControl()
     job = threading.Thread(target=servo.main)
+    job.daemon = True
     job.start()
 
     while True:
@@ -177,8 +252,7 @@ if __name__ == "__main__":
             servo.stop()
             servo.command = "x"
             break
-
-        if user_input in servo.directions:  # key: a, s, d, w
+        if user_input in servo.controls:  # input: a, s, d, w, control
             servo.command = user_input
         else:
             try:
