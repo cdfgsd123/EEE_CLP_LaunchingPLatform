@@ -55,8 +55,6 @@ class LaunchPlatformApp(QWidget):
 
 
 def main():
-    # app = QApplication(sys.argv)
-    # ex = ExampleApp()
     app = QApplication(sys.argv)
     window = LaunchPlatformApp()
     window.show()
