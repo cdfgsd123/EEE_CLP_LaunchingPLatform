@@ -156,22 +156,22 @@ class ServoControl:
         speed = self.getSpeed()
         print("speed: ", speed)
         if self.targetPos <= 180 and self.pos > 180:
-            self.turnLeft(speed)
+            self.turnRight(speed)
         elif self.targetPos > 180 and self.pos <= 180:
-            self.turnRight(speed)
-        elif self.targetPos > self.pos:
             self.turnLeft(speed)
-        else:
+        elif self.targetPos > self.pos:
             self.turnRight(speed)
+        else:
+            self.turnLeft(speed)
         return False
 
     # update target position
     def updateTargetPos(self):
         # + or minus depend on the putting angle
         if self.command == "d":
-            self.targetPos -= 12  # right turn 12 degree
+            self.targetPos += 12  # right turn 12 degree
         elif self.command == "a":
-            self.targetPos += 12  # left turn 12 degree
+            self.targetPos -= 12  # left turn 12 degree
 
         if self.targetPos >= 360:
             self.targetPos -= 360
