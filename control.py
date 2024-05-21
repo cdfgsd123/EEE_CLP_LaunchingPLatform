@@ -1,4 +1,4 @@
-# control
+# communicate
 import threading
 
 import serial
@@ -37,21 +37,12 @@ class ServoControl:
 
         # initial the position
         self.initPos = False
-        calibrateCount = 0
-        while calibrateCount < 3:
-            receivedString = self.ser.readline()
-            if len(receivedString) >= 25:
-                # current pos
-                tempPos = int(int(receivedString[25]) / 255 * 360)
-                tempPos -= self.calibrate
-                if tempPos >= 360:
-                    tempPos -= 360
-                elif tempPos < 0:
-                    tempPos += 360
-                self.pos = tempPos
-                print(receivedString)
-                calibrateCount += 1
-                print("Degree = ", self.pos)
+        initCount = 0
+        while initCount < 3:
+            success, _ = self.readPosFromImu(isCalibrating=False)
+            if success:
+                initCount += 1
+
         self.initPos = True
         if targetPos is None:
             self.targetPos = self.pos
@@ -86,6 +77,7 @@ class ServoControl:
         self.LeftString[3] = speed  # servo 2
         self.LeftString[5] = speed  # servo 4
         self.ser.write(serial.to_bytes(self.LeftString))
+        return self.pos
 
     def turnRight(self, speed):
         self.RightString[2] = 0xFF - speed  # servo 1
@@ -94,9 +86,11 @@ class ServoControl:
         self.RightString[3] = 0xFF - speed  # servo 2
         self.RightString[5] = 0xFF - speed  # servo 4
         self.ser.write(serial.to_bytes(self.RightString))
+        return self.pos
 
     def stop(self):
         self.ser.write(serial.to_bytes(self.stopString))
+        return self.pos
 
     def goForward(self):
         self.ser.write(serial.to_bytes(self.forwardString))
@@ -104,34 +98,53 @@ class ServoControl:
     def goBack(self):
         self.ser.write(serial.to_bytes(self.backwardString))
 
-    # show output and update logic
-    def showOutput(self, command=None):
-        self.command = command
+    # return bool to declare success and calibrated angle if it is not called
+    # when calibrating with "calibrateAngle(self)"
+    def readPosFromImu(self, isCalibrating=False):
         receivedString = self.ser.readline()
         if len(receivedString) >= 25:
             tempPos = int(int(receivedString[25]) / 255 * 360)  # current pos
-            tempPos -= self.calibrate
+            if isCalibrating is False:
+                tempPos -= self.calibrate
             if tempPos >= 360:
                 tempPos -= 360
             elif tempPos < 0:
                 tempPos += 360
-            self.pos = tempPos
-            print(receivedString)
+            if isCalibrating is False:
+                self.pos = tempPos
+            return True, tempPos
+        else:
+            return False, 0
 
-            print("Degree = ", self.pos)
-            print("targetPos = ", self.targetPos)
+    # show information
+    def printDetails(self):
+        print("Degree = ", self.pos)
+        print("targetPos = ", self.targetPos)
+        print("getSpeedDisplay: ", self.getSpeedDisplay())
+        print()
 
+    # show output and update logic
+    def process(self, command=None) -> int:
+        self.command = command
+        success, _ = self.readPosFromImu(isCalibrating=False)
+        if success:
             self.updateTargetPos()
-
-            stopped = self.dstop()
-            print("stopped: ", stopped)
-            print("getSpeedDisplay: ", self.getSpeedDisplay())
-            print()
-        return int(self.targetPos)
+            stopped = self.dstop
+            print("stopped:", stopped)
+            self.printDetails()
+        return int(self.pos)
 
     # determine move or stop
-    def dstop(self):
+    def dstop(self) -> bool:
         # print("pos:", pos, " targetPos: ", targetPos)
+        if self.command == "w":
+            self.goForward()
+            self.stop()
+            return False
+        if self.command == "s":
+            self.goBack()
+            self.stop()
+            return False
         tempDist = abs(self.targetPos - self.pos)
         if tempDist >= 180:
             tempDist = 360 - tempDist
@@ -143,22 +156,22 @@ class ServoControl:
         speed = self.getSpeed()
         print("speed: ", speed)
         if self.targetPos <= 180 and self.pos > 180:
-            self.turnLeft(speed)
+            self.turnRight(speed)
         elif self.targetPos > 180 and self.pos <= 180:
-            self.turnRight(speed)
-        elif self.targetPos > self.pos:
             self.turnLeft(speed)
-        else:
+        elif self.targetPos > self.pos:
             self.turnRight(speed)
+        else:
+            self.turnLeft(speed)
         return False
 
     # update target position
     def updateTargetPos(self):
         # + or minus depend on the putting angle
         if self.command == "d":
-            self.targetPos -= 12  # right turn 12 degree
+            self.targetPos += 12  # right turn 12 degree
         elif self.command == "a":
-            self.targetPos += 12  # left turn 12 degree
+            self.targetPos -= 12  # left turn 12 degree
 
         if self.targetPos >= 360:
             self.targetPos -= 360
@@ -166,7 +179,7 @@ class ServoControl:
             self.targetPos += 360
 
     # return a value between 0 to 1 to represent servo speed(1: max speed)
-    def getSpeedDisplay(self):
+    def getSpeedDisplay(self) -> float:
         distance = abs(self.targetPos - self.pos)
         if distance >= 180:
             distance = 360 - distance
@@ -181,7 +194,7 @@ class ServoControl:
             return fraction
 
     # Servo speed for motion
-    def getSpeed(self):
+    def getSpeed(self) -> int:
         fraction = self.getSpeedDisplay()
         if fraction == 0:
             return 0
@@ -195,30 +208,24 @@ class ServoControl:
         # initial the position
         prevPos, tempPos, tempAngleDiff = 0
         self.stop()
-
         self.initPos = False
         calibrateCount = 0
+        # tempAngleDiff <= 3: the platform approximately stopped
         while calibrateCount < 5 or tempAngleDiff > 3:
-            receivedString = self.ser.readline()
-            if len(receivedString) >= 25:
-                prevPos = tempPos
-                # current pos
-                tempPos = int(int(receivedString[25]) / 255 * 360)
-                if tempPos >= 360:
-                    tempPos -= 360
-                elif tempPos < 0:
-                    tempPos += 360
-                print("tempPos = ", tempPos)
+            success, tempPos = self.readPosFromImu(isCalibrating=True)
+            if success:
                 calibrateCount += 1
-
                 if calibrateCount >= 5:
                     tempAngleDiff = abs(prevPos - tempPos)
                     if tempAngleDiff > 180:
                         tempAngleDiff = 360 - tempAngleDiff
-
-        self.initPos = True
-        self.calibrate = tempPos
-        self.pos = 0
+                    if tempAngleDiff <= 3:
+                        self.initPos = True
+                        self.calibrate = tempPos
+                        self.pos = 0
+                        return self.pos
+                prevPos = tempPos
+        return self.pos
 
     # main function
     # if command is given, we need "self.coomand = None"
@@ -229,14 +236,14 @@ class ServoControl:
         while True:
             print(self.command)
             if self.command is None:
-                self.showOutput()
+                _ = self.process()  # out:current pos with offset
             elif self.command == "calibrate":
-                self.calibrateAngle()
+                _ = self.calibrateAngle()  # out:current pos with offset
                 self.command = None
             elif self.command == "x":
                 return
             else:
-                self.showOutput(self.command)
+                _ = self.process(self.command)  # out:current pos with offset
                 self.command = None
 
 
@@ -249,7 +256,7 @@ if __name__ == "__main__":
     while True:
         user_input = input("Please enter desired degree: ")
         if user_input == "x":
-            servo.stop()
+            _ = servo.stop()  # out:current pos with offset
             servo.command = "x"
             break
         if user_input in servo.controls:  # input: a, s, d, w, control
