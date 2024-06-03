@@ -730,7 +730,7 @@ void IMU(void *pvI2C) {
       if (AccZ < 0) roll = roll + 256 / 2;
     } else {
       roll = 256 / 4 - (atan(AccZ / AccX) / 2 / 3.1415926) * 256;
-      if (AccY < 0) roll = roll + 256 / 2;
+      if (AccX < 0) roll = roll + 256 / 2;
     }
     roll = (uint8_t)round(roll);
     xQueueOverwrite(ImuMail, &roll);
