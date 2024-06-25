@@ -1,9 +1,8 @@
-# communicate
+# control with wireless communication
 # function declaration
 # https://docs.google.com/spreadsheets/d/1Wc7fULlIymNZdzb6pMLg2qQt56mEpI93gTLk9oNqMaI/edit#gid=0
+import socket
 import threading
-
-import serial
 
 
 class ServoControl:
@@ -30,22 +29,23 @@ class ServoControl:
         self.RightString = [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
         # current pos [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
 
-        # self.backwardString = [0x60, 0x0B, 0xA0, 0xA0, 0x60, 0x60]
-        # self.forwardString = [0x60, 0x0B, 0x60, 0x60, 0xA0, 0xA0]
-
-        self.backwardString = [0x60, 0x0B, 0x60, 0xA0, 0xA0, 0x60]
-        self.forwardString = [0x60, 0x0B, 0xA0, 0x60, 0x60, 0xA0]
-
+        self.backwardString = [0x60, 0x0B, 0xA0, 0x60, 0x60, 0xA0]
+        self.forwardString = [0x60, 0x0B, 0x60, 0xA0, 0xA0, 0x60]
+        self.continueString = [0x60, 0x0A, 0x80, 0x80, 0x80, 0x80]
         self.stopString = [0x60, 0x0B, 0x80, 0x80, 0x80, 0x80]
 
-        # serial connection
-        self.ser = serial.Serial(port="COM6", baudrate=115200, timeout=0.5)
+        self.port = 8088
+
+        # Prompt for IP address at the start
+        self.ip = "192.168.10.35"
 
         # initial the position
         self.initPos = False
         initCount = 0
         while initCount < 3:
-            success, _ = self.readPosFromImu(isCalibrating=False)
+            success, _ = self.readImuAndControl(
+                self.ip, self.port, self.continueString, isCalibrating=False
+            )
             if success:
                 initCount += 1
 
@@ -77,53 +77,93 @@ class ServoControl:
 
     # 4 directions motion and stop of 3/6 configuration
     def turnLeft(self, speed):
-        self.LeftString[2] = 0xFF - speed  # servo 1, clockwise
-        self.LeftString[3] = 0xFF - speed  # servo 2, clockwise
+        self.LeftString[2] = speed  # servo 1, clockwise
+        self.LeftString[3] = speed  # servo 2, clockwise
 
-        self.LeftString[4] = speed  # servo 3, anti-clockwise
-        self.LeftString[5] = speed  # servo 4, anti-clockwise
-        self.ser.write(serial.to_bytes(self.LeftString))
+        self.LeftString[4] = 0xFF - speed  # servo 3, anti-clockwise
+        self.LeftString[5] = 0xFF - speed  # servo 4, anti-clockwise
+        self.readImuAndControl(
+            self.ip,
+            self.port,
+            self.LeftString,
+            isCalibrating=False,
+        )
         return self.pos
 
     def turnRight(self, speed):
-        self.RightString[2] = speed  # servo 1, anti-clockwise
-        self.RightString[3] = speed  # servo 2, anti-clockwise
+        self.RightString[2] = 0xFF - speed  # servo 1, anti-clockwise
+        self.RightString[3] = 0xFF - speed  # servo 2, anti-clockwise
 
-        self.RightString[4] = 0xFF - speed  # servo 3, clockwise
-        self.RightString[5] = 0xFF - speed  # servo 4, clockwise
-        self.ser.write(serial.to_bytes(self.RightString))
+        self.RightString[4] = speed  # servo 3, clockwise
+        self.RightString[5] = speed  # servo 4, clockwise
+        self.readImuAndControl(
+            self.ip,
+            self.port,
+            self.RightString,
+            isCalibrating=False,
+        )
         return self.pos
 
     def stop(self):
-        self.ser.write(serial.to_bytes(self.stopString))
+        self.readImuAndControl(
+            self.ip,
+            self.port,
+            self.stopString,
+            isCalibrating=False,
+        )
         return self.pos
 
     def goForward(self):
-        self.ser.write(serial.to_bytes(self.forwardString))
+        self.readImuAndControl(
+            self.ip,
+            self.port,
+            self.forwardString,
+            isCalibrating=False,
+        )
 
     def goBack(self):
-        self.ser.write(serial.to_bytes(self.backwardString))
+        self.readImuAndControl(
+            self.ip,
+            self.port,
+            self.backwardString,
+            isCalibrating=False,
+        )
 
-    # return bool to declare success and calibrated angle if it is not called
-    # when calibrating with "calibrateAngle(self)"
-    def readPosFromImu(self, isCalibrating=False):
-        receivedString = self.ser.readline()
-        if len(receivedString) >= 26:
-            print("receivedString", receivedString)
-            print("len(receivedString)", len(receivedString))
-            # print("receivedString[25]", receivedString[25])
-            tempPos = int(int(receivedString[25]) / 255 * 360)  # current pos
-            if isCalibrating is False:
-                tempPos -= self.calibrate
-            if tempPos >= 360:
-                tempPos -= 360
-            elif tempPos < 0:
-                tempPos += 360
-            if isCalibrating is False:
-                self.pos = tempPos
-            return True, tempPos
-        else:
+    def continuePrev(self):
+        self.readImuAndControl(
+            self.ip,
+            self.port,
+            self.continueString,
+            isCalibrating=False,
+        )
+
+    # when isCalibrating == True, it means calibrating angle.
+    def readImuAndControl(self, ip, port, hex_array, isCalibrating=False):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        message = bytes(hex_array)
+        try:
+            sock.sendto(message, (ip, port))
+            response, server = sock.recvfrom(26)
+            response_array = [f"{byte:02X}" for byte in response]
+            if len(response_array) >= 26:
+                value = int(response_array[25], 16)  # Convert hex str to int
+                tempPos = int((value / 255) * 360)
+                if isCalibrating is False:
+                    tempPos -= self.calibrate
+                if tempPos >= 360:
+                    tempPos -= 360
+                elif tempPos < 0:
+                    tempPos += 360
+                if isCalibrating is False:
+                    self.pos = tempPos
+                return True, tempPos
+            else:
+                return False, 0
+        except socket.error as e:
+            print(f"Socket error: {e}")
             return False, 0
+        finally:
+            sock.close()
 
     # show information
     def printDetails(self):
@@ -135,7 +175,12 @@ class ServoControl:
     # show output and update logic
     def process(self, command=None) -> int:
         self.command = command
-        success, _ = self.readPosFromImu(isCalibrating=False)
+        success, _ = self.readImuAndControl(
+            self.ip,
+            self.port,
+            self.continueString,
+            isCalibrating=False,
+        )
         if success:
             self.updateTargetPos()
             stopped = self.dstop()
@@ -222,7 +267,9 @@ class ServoControl:
         calibrateCount = 0
         # tempAngleDiff <= 3: the platform approximately stopped
         while calibrateCount < 5 or tempAngleDiff > 3:
-            success, tempPos = self.readPosFromImu(isCalibrating=True)
+            success, tempPos = self.readImuAndControl(
+                self.ip, self.port, self.continueString, isCalibrating=True
+            )
             if success:
                 calibrateCount += 1
                 if calibrateCount >= 5:
