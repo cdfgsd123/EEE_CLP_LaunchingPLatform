@@ -98,11 +98,20 @@ class ServoControl:
         return self.pos
 
     def getSlotNum(self):
-        slot = self.pos // self.angleDivision
-        return int(slot)
+        degree = self.pos % 360
+        if (360 - self.angleDivision // 2) <= degree <= 359 or 0 <= degree < (
+            self.angleDivision // 2
+        ):
+            return 1
+        else:
+            return int((degree - self.angleDivision // 2) // 12) + 2
 
     def setTargetPosBySlotNum(self, slotNum):
-        self.targetPos = slotNum * self.angleDivision + self.angleDivision // 2
+        if slotNum == 1:
+            self.targetPos = 0
+        else:
+            self.targetPos = (slotNum - 2) * 12 + 12
+        return self.targetPos
 
     # 4 directions motion and stop of 3/6 configuration
     def turnLeft(self, speed):
