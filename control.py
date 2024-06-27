@@ -7,6 +7,7 @@ import threading
 
 class ServoControl:
     def __init__(self, targetPos=None, calibrate=0):
+        self.calibrateFileName = "calibrateFile.txt"
         self.calibrate = calibrate
         self.receivedString = ""
         self.pos = 0  # current position in degree
@@ -37,8 +38,20 @@ class ServoControl:
         self.port = 8088
 
         # Prompt for IP address at the start
-        self.ip = "192.168.10.35"
+        self.ip = "192.168.10.8"
 
+        # Read the calibrate parameter for text file
+        readInteger = self.readCalibraeFromFile(self.calibrateFileName)
+        if readInteger is not None:
+            print(f"Integer read from the file: {readInteger}")
+            self.calibrate = readInteger
+        else:  # if fail, store 0 as calibrating parameter
+            print("Failed to read integer from the file. Writing a new file.")
+            self.writeCalibrateToFile(0, self.calibrateFileName)
+            readInteger = self.readCalibraeFromFile(self.calibrateFileName)
+            if readInteger is not None:
+                print(f"Integer read from the new file: {readInteger}")
+            self.calibarte = 0
         # initial the position
         self.initPos = False
         initCount = 0
@@ -53,6 +66,22 @@ class ServoControl:
         if targetPos is None:
             self.targetPos = self.pos
         print("finish init")
+
+    def writeCalibrateToFile(self, integer, filename):
+        with open(filename, "w") as file:
+            file.write(str(integer))
+        print(f"Integer {integer} has been written to {filename}")
+
+    def readCalibraeFromFile(self, filename):
+        try:
+            with open(filename, "r") as file:
+                return int(file.read())
+        except FileNotFoundError:
+            print(f"File {filename} not found. Creating a new file.")
+            return None
+        except ValueError:
+            print(f"File {filename} does not contain a valid integer.")
+            return None
 
     #  setter and getter
     def setCommand(self, input):
@@ -139,13 +168,17 @@ class ServoControl:
 
     # when isCalibrating == True, it means calibrating angle.
     def readImuAndControl(self, ip, port, hex_array, isCalibrating=False):
+        print("try1")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         message = bytes(hex_array)
         try:
             sock.sendto(message, (ip, port))
             response, server = sock.recvfrom(26)
             response_array = [f"{byte:02X}" for byte in response]
+            print("trying")
+
             if len(response_array) >= 26:
+                print("receive imu pos successfully")
                 value = int(response_array[25], 16)  # Convert hex str to int
                 tempPos = int((value / 255) * 360)
                 if isCalibrating is False:
@@ -208,14 +241,23 @@ class ServoControl:
 
         speed = self.getSpeed()
         print("speed: ", speed)
-        if self.targetPos <= 180 and self.pos > 180:
+        diff = self.targetPos - self.pos
+        if diff < 0 and abs(diff) > 180:
             self.turnRight(speed)
-        elif self.targetPos > 180 and self.pos <= 180:
+        elif diff < 0 and abs(diff) <= 180:
             self.turnLeft(speed)
-        elif self.targetPos > self.pos:
-            self.turnRight(speed)
+        elif diff > 0 and abs(diff) > 180:
+            self.turnLeft(speed)
         else:
-            self.turnLeft(speed)
+            self.turnRight(speed)
+        # if self.targetPos <= 180 and self.pos > 180:
+        #     self.turnRight(speed)
+        # elif self.targetPos > 180 and self.pos <= 180:
+        #     self.turnLeft(speed)
+        # elif self.targetPos > self.pos:
+        #     self.turnRight(speed)
+        # else:
+        #     self.turnLeft(speed)
         return False
 
     # update target position
@@ -279,6 +321,11 @@ class ServoControl:
                     if tempAngleDiff <= 3:
                         self.initPos = True
                         self.calibrate = tempPos
+                        # store calibrate parameter to file
+                        self.writeCalibrateToFile(
+                            tempPos,
+                            self.calibrateFileName,
+                        )
                         self.pos = 0
                         return self.pos
                 prevPos = tempPos
