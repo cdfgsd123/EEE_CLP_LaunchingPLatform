@@ -727,12 +727,13 @@ void IMU(void *pvI2C) {
     AccY = AccY * 0.7 + (int16_t)(i2c_byte[2] << 8 | i2c_byte[3]) / 16384.0f * 0.3;
     AccZ = AccZ * 0.7 + (int16_t)(i2c_byte[4] << 8 | i2c_byte[5]) / 16384.0f * 0.3;
     if (abs(AccZ) > abs(AccX)) {
-      roll = -atan(AccX / AccZ) / 2 / 3.1415926 * 256;
+      roll = atan(AccX / AccZ) / 2 / 3.1415926 * 256;
       if (AccZ < 0) roll = roll + 256 / 2;
     } else {
-      roll = 256 / 4 + (atan(AccZ / AccX) / 2 / 3.1415926) * 256;
+      roll = 256 / 4 - (atan(AccZ / AccX) / 2 / 3.1415926) * 256;
       if (AccX < 0) roll = roll + 256 / 2;
     }
+    roll = abs(roll-256);
     roll = (uint8_t)round(roll);
     xQueueOverwrite(ImuMail, &roll);
     //Enter blocked stage and wait
