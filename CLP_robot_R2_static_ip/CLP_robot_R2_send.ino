@@ -723,15 +723,15 @@ void IMU(void *pvI2C) {
     i2c_byte[0] = I2c_gyro_get_accelXH;
     i2c->ENCODE(i2c_byte, &upad_null);
     i2c->DECODE(i2c_byte, &upad_null);
-    AccX = AccX * 0.95 + (int16_t)(i2c_byte[0] << 8 | i2c_byte[1]) / 16384.0f * 0.05;
-    AccY = AccY * 0.95 + (int16_t)(i2c_byte[2] << 8 | i2c_byte[3]) / 16384.0f * 0.05;
-    AccZ = AccZ * 0.95 + (int16_t)(i2c_byte[4] << 8 | i2c_byte[5]) / 16384.0f * 0.05;
-    if (abs(AccZ) > abs(AccY)) {
-      roll = atan(AccY / AccZ) / 2 / 3.1415926 * 256;
+    AccX = AccX * 0.7 + (int16_t)(i2c_byte[0] << 8 | i2c_byte[1]) / 16384.0f * 0.3;
+    AccY = AccY * 0.7 + (int16_t)(i2c_byte[2] << 8 | i2c_byte[3]) / 16384.0f * 0.3;
+    AccZ = AccZ * 0.7 + (int16_t)(i2c_byte[4] << 8 | i2c_byte[5]) / 16384.0f * 0.3;
+    if (abs(AccZ) > abs(AccX)) {
+      roll = -atan(AccX / AccZ) / 2 / 3.1415926 * 256;
       if (AccZ < 0) roll = roll + 256 / 2;
     } else {
-      roll = 256 / 4 - (atan(AccZ / AccY) / 2 / 3.1415926) * 256;
-      if (AccY < 0) roll = roll + 256 / 2;
+      roll = 256 / 4 + (atan(AccZ / AccX) / 2 / 3.1415926) * 256;
+      if (AccX < 0) roll = roll + 256 / 2;
     }
     roll = (uint8_t)round(roll);
     xQueueOverwrite(ImuMail, &roll);
