@@ -9,6 +9,7 @@ class ServoControl:
     def __init__(self, targetPos=None, calibrate=0):
         self.calibrateFileName = "calibrateFile.txt"
         self.calibrate = calibrate
+        self.isCalibrating = False
         self.receivedString = ""
         self.pos = 0  # current position in degree
         if targetPos is not None:
@@ -16,13 +17,13 @@ class ServoControl:
         self.command = None  # control command
         self.controls = ["a", "d", "s", "w", "calibrate", "q"]
         # acceptable angle error
-        self.lowThreshold = 5  # acceptable angle error
+        self.lowThreshold = 2  # acceptable angle error
         self.highThreshold = 20  # for calcuating speed of rotation
         self.thresholdRange = self.highThreshold - self.lowThreshold
         self.angleDivision = 360 // 30
         # speed of servo (self-defined)
-        self.maxSpeed = 0xC0  # larger than 0x80 and assume
-        self.minSpeed = 0x90  # larger than 0x80
+        self.maxSpeed = 0xEE  # larger than 0x80 and assume
+        self.minSpeed = 0xC0  # larger than 0x80
         self.speedRange = self.maxSpeed - self.minSpeed
 
         # 6 byte motion control signal to ESP32
@@ -30,15 +31,15 @@ class ServoControl:
         self.RightString = [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
         # current pos [0x60, 0x0B, 0x00, 0x00, 0x00, 0x00]
 
-        self.backwardString = [0x60, 0x0B, 0xA0, 0x60, 0x60, 0xA0]
-        self.forwardString = [0x60, 0x0B, 0x60, 0xA0, 0xA0, 0x60]
+        self.backwardString = [0x60, 0x0B, 0xFF, 0x00, 0x00, 0xFF]
+        self.forwardString = [0x60, 0x0B, 0x00, 0xFF, 0xFF, 0x00]
         self.continueString = [0x60, 0x0A, 0x80, 0x80, 0x80, 0x80]
         self.stopString = [0x60, 0x0B, 0x80, 0x80, 0x80, 0x80]
 
         self.port = 8088
 
         # Prompt for IP address at the start
-        self.ip = "192.168.10.8"
+        self.ip = "192.168.10.101"
 
         # Read the calibrate parameter for text file
         readInteger = self.readCalibraeFromFile(self.calibrateFileName)
@@ -177,19 +178,21 @@ class ServoControl:
 
     # when isCalibrating == True, it means calibrating angle.
     def readImuAndControl(self, ip, port, hex_array, isCalibrating=False):
-        print("try1")
+        # print("try1")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         message = bytes(hex_array)
         try:
             sock.sendto(message, (ip, port))
             response, server = sock.recvfrom(26)
             response_array = [f"{byte:02X}" for byte in response]
-            print("trying")
+            # print("trying")
 
             if len(response_array) >= 26:
                 print("receive imu pos successfully")
                 value = int(response_array[25], 16)  # Convert hex str to int
                 tempPos = int((value / 255) * 360)
+                # # depend on it is clockwise to increase degree or not
+                # tempPos = (360 - tempPos) % 360
                 if isCalibrating is False:
                     tempPos -= self.calibrate
                 if tempPos >= 360:
@@ -313,13 +316,14 @@ class ServoControl:
     def calibrateAngle(self):
         # initial the position
         prevPos, tempPos, tempAngleDiff = 0, 0, 0
+        tempAngleDiffMin = 2
         self.stop()
         self.initPos = False
         calibrateCount = 0
         # tempAngleDiff <= 3: the platform approximately stopped
-        while calibrateCount < 5 or tempAngleDiff > 3:
+        while calibrateCount < 5 or tempAngleDiff > tempAngleDiffMin:
             success, tempPos = self.readImuAndControl(
-                self.ip, self.port, self.continueString, isCalibrating=True
+                self.ip, self.port, self.stopString, isCalibrating=True
             )
             if success:
                 calibrateCount += 1
@@ -327,7 +331,7 @@ class ServoControl:
                     tempAngleDiff = abs(prevPos - tempPos)
                     if tempAngleDiff > 180:
                         tempAngleDiff = 360 - tempAngleDiff
-                    if tempAngleDiff <= 3:
+                    if tempAngleDiff <= tempAngleDiffMin:
                         self.initPos = True
                         self.calibrate = tempPos
                         # store calibrate parameter to file
@@ -336,6 +340,8 @@ class ServoControl:
                             self.calibrateFileName,
                         )
                         self.pos = 0
+                        self.command = None
+                        self.isCalibrating = False
                         return self.pos
                 prevPos = tempPos
         return self.pos
@@ -352,8 +358,10 @@ class ServoControl:
                 _ = self.process()  # out:current pos with offset
 
             elif self.command == "calibrate":
-                _ = self.calibrateAngle()  # out:current pos with offset
-                self.command = None
+                if self.isCalibrating is False:
+                    self.isCalibrating = True
+                    _ = self.calibrateAngle()
+
             elif self.command == "x":
                 return
             elif self.command == "q":
@@ -361,7 +369,7 @@ class ServoControl:
                 self.stop()
                 self.command = None
             elif self.command == "w" or "s":
-                _ = self.process(self.command)  # out:current pos with offset
+                _ = self.process(self.command)  # out:current pos0 with offset
             else:
                 # input: a, s
                 _ = self.process(self.command)  # out:current pos with offset
